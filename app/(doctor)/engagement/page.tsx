@@ -1,0 +1,13 @@
+'use client';
+import { useState } from 'react';import { Bot,Check,ShieldAlert } from 'lucide-react';
+import { Badge, Card, CardTitle, Page } from '@/components/frontend/ui';
+import { useDemo, patientName } from '@/components/frontend/demo-store';
+import { VoiceInput,Flash } from '@/components/frontend/widgets';
+export default function Engagement(){const {state,replyQuestion}=useDemo();const [drafts,setDrafts]=useState<Record<string,string>>({});const [confirmation,setConfirmation]=useState('');const [notice,setNotice]=useState('');
+ const ordered=[...state.questions].sort((a,b)=>(a.status==='Urgent'?0:a.status==='Pending review'?1:2)-(b.status==='Urgent'?0:b.status==='Pending review'?1:2));
+ return <Page title="Patient Engagement" eyebrow="Doctor review required for clinical questions"><div className="sv-grid">{ordered.map(q=><Card key={q.id}><div className="sv-grid sv-grid-2"><div><div className="sv-person"><span className="sv-person-avatar">{patientName(state,q.patientId).slice(0,2)}</span><div className="sv-person-copy"><strong>{patientName(state,q.patientId)}</strong><span>{q.source} · {new Date(q.createdAt).toLocaleString()}</span></div></div><p className="sv-pre" style={{fontSize:15,marginTop:14}}>“{q.text}”</p><Badge tone={q.status==='Urgent'?'red':q.status==='Pending review'?'amber':'green'}>{q.status}</Badge></div>
+ <div><div className="sv-inline"><Bot size={17}/><strong>Doctor response editor</strong></div><textarea className="sv-input sv-textarea" disabled={q.status==='Approved and sent'} value={drafts[q.id]??q.reply} onChange={e=>setDrafts(d=>({...d,[q.id]:e.target.value}))} placeholder="Write a clinician-approved response…"/>
+ {q.status!=='Approved and sent'&&<><div className="sv-two-actions"><VoiceInput label="Voice edit" onResult={t=>setDrafts(d=>({...d,[q.id]:t}))}/><label className="sv-option"><input type="checkbox" checked={confirmation===q.id} onChange={e=>setConfirmation(e.target.checked?q.id:'')}/> Clinician reviewed</label><button className="sv-btn" disabled={confirmation!==q.id||!(drafts[q.id]??q.reply).trim()} onClick={()=>{replyQuestion(q.id,drafts[q.id]??q.reply);setNotice('Doctor-approved answer recorded in demo; it was not actually sent to a patient.');setConfirmation('');}}><Check size={16}/> Approve Response</button></div></>}
+ </div></div></Card>)}{!ordered.length&&<Card>No patient questions are currently queued.</Card>}</div>
+ <Flash message={notice}/><div className="sv-callout red" style={{marginTop:16}}><ShieldAlert size={17} style={{display:'inline'}}/> Urgent symptoms must receive immediate safety guidance and appropriate escalation. This frontend demo does not deliver live alerts or clinical triage. AI must not prescribe or independently approve treatment.</div></Page>;
+}

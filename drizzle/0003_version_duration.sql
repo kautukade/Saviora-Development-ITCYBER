@@ -1,0 +1,1 @@
+ALTER TABLE "content_versions" ADD COLUMN "duration_seconds" integer;

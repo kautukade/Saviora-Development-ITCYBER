@@ -1,0 +1,208 @@
+SAVIORA — HANDOVER
+Written 6 September 2026. Repo: /home/swapnil/master/nephro
+Remote: github.com/SavioraHealth/saviora-platform (private) · branch main
+Live: https://app.saviorahealth.com
+
+
+WHAT THIS IS
+────────────────────────────────────────────────────────────────────────────
+A patient-education platform for ONE pilot nephrologist, Dr Sachin Naik, in an
+Indian outpatient clinic. His consultations average two minutes. Every design
+decision follows from that.
+
+The loop: the doctor sends short videos to a patient over WhatsApp; the patient
+watches them in a Shorts-style feed and can ask questions; the bot answers only
+from material the doctor approved and passes everything else to him; the
+patient can photograph a lab report and confirm the values read back to them;
+the doctor gets a summary before the visit.
+
+MVP is complete and deployed. Read README.md for setup, AGENTS.md for the
+Next.js caveat.
+
+
+THE FOUNDER
+────────────────────────────────────────────────────────────────────────────
+Accounts are devanshalalwani@gmail.com / GitHub devanshlalwani13. Do not use
+anything belonging to "swapnil bhat" — this box's SSH key is that name and it
+is not what he wants. Local git identity is already pinned in the repo.
+
+He works fast and in short messages, often sending several mid-task. He does
+not want narration, options lists, or re-litigating decisions. He wants the
+thing built and a straight account of what happened.
+
+Two standing instructions:
+  · NEVER publish a Claude artifact for this project without asking. One was
+    published unrequested and deleted. Report in the terminal.
+  · Do not spawn agent fleets. He said "use ultracode" once, early; that was
+    for one task, not standing permission. Three workflow runs cost ~2.3M
+    tokens and shipped almost nothing — all seven verifiers in one run timed
+    out and the findings were re-checked by hand anyway. He raised this
+    directly. Work on the code yourself.
+
+
+HOW THE CODE IS SHAPED
+────────────────────────────────────────────────────────────────────────────
+Flat monolith. One Next.js 16 app, App Router, React 19, Tailwind 4 (CSS-first
+@theme, there is no tailwind.config.js). Drizzle + postgres.js, same driver
+local and on Neon so they cannot drift.
+
+  lib/          one file per concern; understanding an endpoint means opening
+                the route and the one lib file it calls
+  app/(doctor)/ the doctor's screens
+  app/p/[token] the patient's, reachable only by a private link
+  scripts/      migrate, seed, seed-videos, create-doctor, demo, verify
+
+The column that shapes everything is ownerDoctorId on `content` and
+`documents`: NULL means Saviora authored it and every doctor sees it; a doctor
+id means it is theirs alone. One rule, `ownerDoctorId IS NULL OR = me`, governs
+both. A patient can never be answered from another clinic's material.
+
+Progress is an append-only event log, never a stored percentage, so what a
+patient actually watched cannot drift from what the doctor is shown.
+
+Comments explain WHY, not what. Match that. Several comments record a bug that
+was fixed and why the code looks the way it does — those have earned their
+place; do not tidy them away.
+
+
+VERIFY BEFORE YOU BELIEVE ANYTHING
+────────────────────────────────────────────────────────────────────────────
+  npx tsx scripts/verify.ts     32 checks, whole journey, real database and
+                                real model. Refuses a non-local DATABASE_URL.
+
+KNOWN FLAKE: about one run in three, three checks fail together —
+"a question the material covers is answered", "the answer quotes the material",
+"an answered question is not called an escalation". The model produces the
+right answer but emits no citation, and the citation gate escalates it. It
+happens when the clinic-hours question follows the chest-pain turn, so history
+is involved. Measured 12/12 in isolation with both a 2-source and a 12-source
+corpus, so it is NOT corpus size. Re-run before believing a failure. Worth
+fixing properly: in production it means Dr Naik gets unnecessary escalations.
+
+For UI work there is no test framework. Drive a real browser — playwright lives
+at /home/swapnil/master/cal/node_modules/playwright. Measure, do not assume.
+A measurement harness that does not assert the page RENDERED will happily
+report an error page as "perfectly responsive"; that happened.
+
+
+THE STATE OF WHATSAPP
+────────────────────────────────────────────────────────────────────────────
+Working end to end. A message was sent from the app and arrived; the patient
+replied and the bot answered.
+
+  App          "Saviora"  1701519790928168
+  WABA         1968283453860005  (APPROVED)
+  Phone ID     1260208500515033  → +1 555-205-2901, META'S TEST NUMBER
+  Webhook      https://app.saviorahealth.com/api/whatsapp, active, `messages`
+  Token        system user, expires 3 NOVEMBER 2026
+
+THE REAL NUMBER IS NOT ON THE WABA YET. +91 98926 42971 is set as
+WHATSAPP_PUBLIC_NUMBER (what the patient page invites them to write to) but has
+not been added as a sending number in WhatsApp Manager. The test number only
+messages up to 5 allow-listed people — currently 9022413171. Before any real
+patient: add the number, verify by SMS, set a display name, then swap
+WHATSAPP_PHONE_ID. That is a config change, no code.
+
+Traps that cost hours, in case they recur:
+  · The callback URL was once saved as /api/whatsap — one missing p. A 404
+    gives the identical error message to a wrong verify token.
+  · The WABA was subscribed to "WA DevX Webhook Events 1P App", Meta's own
+    debug app, not ours. Everything looks correctly configured while it is
+    wrong and no webhook ever fires.
+  · A system user token carries the assets assigned AT ISSUE TIME. Assign the
+    WABA first, generate the token second. debug_token's granular_scopes shows
+    target_ids — empty means no assets, regardless of how healthy it looks.
+  · There are TWO Meta apps. WHATSAPP_APP_SECRET must belong to the app the
+    WABA is subscribed to, because Meta signs each delivery with that app's
+    secret. Verify with appsecret_proof before setting it.
+  · "accepted" from the send API does not mean delivered. A banned number
+    returns exactly the same success. Always confirm on a real handset.
+
+ONE UNRESOLVED DELIVERY ODDITY: the first link message did not arrive; an
+identical resend with plain quotes and preview_url:false did. Two variables
+changed at once, so it is unproven which mattered — and lib/copy.ts uses smart
+quotes in `sentOne`, the message every patient gets. Worth one controlled send
+to settle before real patients.
+
+
+WHAT WAS BUILT MOST RECENTLY
+────────────────────────────────────────────────────────────────────────────
+Patient feed rebuilt as Shorts: full-bleed video, progress along the top,
+chapter name over the bottom, autoplay. It starts MUTED because browsers refuse
+autoplay with sound, and the first tap anywhere turns sound on. Every player is
+built muted and unmuted on ready — building it unmuted means it silently never
+starts, which cost two taps per video until it was found.
+
+No YouTube furniture reaches the screen. The player is given 96px more height
+than the box it shows through and the box clips it, so the avatar, title,
+caption strip and logo are drawn in the letterbox bands outside the visible
+area. Nothing is cropped. The iframe takes no pointer events.
+
+Doctor screens are genuinely mobile, measured clean at 390x844, 360x780 and
+844x390. Touch rules key on POINTER TYPE, not width — a phone held sideways is
+844px across, so every width breakpoint calls it a desktop while it is still a
+phone with a keyboard that zooms iOS in and never back out.
+
+The assistant streams, with a status line naming what it is doing. 177ms to
+first feedback on production, against 6.5 seconds of blank screen before. Chats
+are kept per doctor, behind "Recent": reopen, rename, delete.
+
+A doctor can upload a video file instead of using YouTube; it plays from blob
+storage with a plain <video>. NOTE: BLOB_READ_WRITE_TOKEN is NOT set in
+production, so uploads currently fall back to "paste a YouTube link instead".
+Provisioning the Blob store is a paid add-on and he wants to be asked first.
+
+
+THE THING MOST WORTH FIXING NEXT
+────────────────────────────────────────────────────────────────────────────
+The corpus is thin. Production holds ten written pieces (blood pressure,
+potassium, sick-day rules, phosphate binders, salt and fluid, and so on) plus
+one clinic-logistics PDF. The eight videos have NO captions and NO summaries —
+0 of 36 content versions have a caption — so the bot cannot answer anything
+about the material a patient just watched.
+
+A patient watches "What is CKD? Chapter 3", asks about it, and gets "I have
+passed your question to your doctor." Coherent, safe, useless.
+
+Two routes: upload Dr Naik's own patient handouts as PDFs (the designed path,
+and clinically reviewed by definition), or write eight short summaries of what
+each video covers. YouTube's transcript endpoint returns empty now — they have
+hardened it — so this cannot be automated from here.
+
+Also open, both needing Dr Naik: reference ranges in lib/panels.ts carry an
+explicit CLINICAL REVIEW GATE comment and have never been reviewed by a
+nephrologist. Thirty thresholds decide whether a real report is called
+critical. A deep-research run on them was started and stopped on cost grounds.
+
+
+ACCOUNTS THAT EXIST
+────────────────────────────────────────────────────────────────────────────
+Production doctors: sachinnaik3@gmail.com (the pilot) and demo1/demo2/demo3
+@saviorahealth.com, shared password, all sign-in verified. That password was
+typed in chat and should be changed before it goes outside the team.
+
+Production patients are demo data: "John Doe" (phone 919022413171, 8 videos)
+and "Demo Patient". John Doe's videos are in HINDI while the interface around
+them is English — each assignment keeps the language it was sent in, by design.
+
+Every credential in this file and in the chat history should be rotated before
+launch. They were pasted in plain text.
+
+
+HOW TO WORK ON IT
+────────────────────────────────────────────────────────────────────────────
+Schema change:  npm run db:generate  →  commit the migration  →  it applies on
+deploy via vercel-build. A schema change once reached production without its
+tables; the build was green and every page touching them returned 500. That is
+why migrations run in the build now.
+
+Deploys go out on push to main. Check them: npx vercel ls --scope saviora.
+Do not trust "Ready" alone — load the page.
+
+When editing with a script, ASSERT the replacement matched. A silent no-op
+string replace once meant a commit claimed to wire up the uploaded-video player
+and had not; the feature would have listed a video and then not played it.
+
+.gitignore now catches *.env and prod.env. `vercel env pull` writes whatever
+filename you give it, and `.env*` only matches names that START with .env — a
+pull to prod.env drops production secrets in the repo root. It happened twice.

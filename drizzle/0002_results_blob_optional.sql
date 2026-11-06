@@ -1,0 +1,1 @@
+ALTER TABLE "test_results" ALTER COLUMN "blob_url" DROP NOT NULL;
